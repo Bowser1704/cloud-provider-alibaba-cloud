@@ -463,15 +463,7 @@ func (e *ECSProvider) DescribeNetworkInterfaces(vpcId string, ips []string, ipVe
 				resp.RequestId, "DescribeNetworkInterfaces", privateIpAddress, begin, last, ipVersionType)
 
 			for _, eni := range resp.NetworkInterfaceSets.NetworkInterfaceSet {
-				if ipVersionType == model.IPv6 {
-					for _, ipv6 := range eni.Ipv6Sets.Ipv6Set {
-						result[ipv6.Ipv6Address] = eni.NetworkInterfaceId
-					}
-				} else {
-					for _, privateIp := range eni.PrivateIpSets.PrivateIpSet {
-						result[privateIp.PrivateIpAddress] = eni.NetworkInterfaceId
-					}
-				}
+				collectNetworkInterfaceAddresses(result, eni, ipVersionType)
 			}
 
 			if resp.NextToken == "" || resp.PageSize < MaxResult {
@@ -479,9 +471,23 @@ func (e *ECSProvider) DescribeNetworkInterfaces(vpcId string, ips []string, ipVe
 			}
 			req.NextToken = resp.NextToken
 		}
-
 	}
 	return result, nil
+}
+
+func collectNetworkInterfaceAddresses(result map[string]string, eni ecs.NetworkInterfaceSet, ipVersionType model.AddressIPVersionType) {
+	if ipVersionType == model.IPv6 {
+		for _, ipv6 := range eni.Ipv6Sets.Ipv6Set {
+			result[ipv6.Ipv6Address] = eni.NetworkInterfaceId
+		}
+		return
+	}
+	for _, privateIP := range eni.PrivateIpSets.PrivateIpSet {
+		result[privateIP.PrivateIpAddress] = eni.NetworkInterfaceId
+	}
+	for _, prefix := range eni.Ipv4PrefixSets.Ipv4PrefixSet {
+		result[prefix.Ipv4Prefix] = eni.NetworkInterfaceId
+	}
 }
 
 func (e *ECSProvider) DescribeNetworkInterfacesByIDs(ids []string) ([]*prvd.EniAttribute, error) {

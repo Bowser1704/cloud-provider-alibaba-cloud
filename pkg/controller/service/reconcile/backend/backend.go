@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -20,6 +21,59 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type NetworkInterfaceLookup func([]string, model.AddressIPVersionType) (map[string]string, error)
+
+// ResolveENIBackendIDs first resolves the supplied addresses directly. For
+// unresolved IPv4 addresses, it retries with the containing /28 prefix.
+func ResolveENIBackendIDs(
+	ips []string,
+	ipVersion model.AddressIPVersionType,
+	lookup NetworkInterfaceLookup,
+) (map[string]string, error) {
+	result, err := lookup(ips, ipVersion)
+	if err != nil {
+		return nil, err
+	}
+	if ipVersion != model.IPv4 {
+		return result, nil
+	}
+
+	prefixToIPs := make(map[string][]string)
+	prefixes := make([]string, 0)
+	seenPrefixes := make(map[string]struct{})
+	for _, ipString := range ips {
+		if _, found := result[ipString]; found {
+			continue
+		}
+		ip := net.ParseIP(ipString).To4()
+		if ip == nil {
+			continue
+		}
+		mask := net.CIDRMask(28, 32)
+		prefix := (&net.IPNet{IP: ip.Mask(mask), Mask: mask}).String()
+		prefixToIPs[prefix] = append(prefixToIPs[prefix], ipString)
+		if _, found := seenPrefixes[prefix]; found {
+			continue
+		}
+		seenPrefixes[prefix] = struct{}{}
+		prefixes = append(prefixes, prefix)
+	}
+	if len(prefixes) == 0 {
+		return result, nil
+	}
+
+	resolvedPrefixes, err := lookup(prefixes, model.IPv4)
+	if err != nil {
+		return nil, err
+	}
+	for prefix, eniID := range resolvedPrefixes {
+		for _, ip := range prefixToIPs[prefix] {
+			result[ip] = eniID
+		}
+	}
+	return result, nil
+}
 
 func NewEndpointWithENI(reqCtx *svcCtx.RequestContext, kubeClient client.Client) (*EndpointWithENI, error) {
 	endpointWithENI := &EndpointWithENI{}

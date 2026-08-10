@@ -17,11 +17,43 @@ import (
 	"k8s.io/cloud-provider-alibaba-cloud/pkg/model"
 	nlbmodel "k8s.io/cloud-provider-alibaba-cloud/pkg/model/nlb"
 	"k8s.io/cloud-provider-alibaba-cloud/pkg/model/tag"
+	prvd "k8s.io/cloud-provider-alibaba-cloud/pkg/provider"
 	"k8s.io/cloud-provider-alibaba-cloud/pkg/util"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+type prefixNLBENIProvider struct {
+	prvd.Provider
+	requests [][]string
+}
+
+func (p *prefixNLBENIProvider) DescribeNetworkInterfaces(_ string, addresses []string, _ model.AddressIPVersionType) (map[string]string, error) {
+	p.requests = append(p.requests, append([]string(nil), addresses...))
+	if len(p.requests) == 1 {
+		return map[string]string{}, nil
+	}
+	return map[string]string{"10.96.0.16/28": "eni-prefix"}, nil
+}
+
+func TestUpdateServerGroupENIBackendID_IPPrefixFallback(t *testing.T) {
+	kubeClient := fake.NewClientBuilder().Build()
+	cloud := &prefixNLBENIProvider{Provider: getMockCloudProvider()}
+	mgr := &ServerGroupManager{kubeClient: kubeClient, cloud: cloud, vpcId: "vpc-id"}
+	nodeName := "prefix-node"
+	sgs := []*nlbmodel.ServerGroup{{Servers: []nlbmodel.ServerGroupServer{{
+		ServerIp: "10.96.0.18", ServerType: nlbmodel.EniServerType, NodeName: &nodeName,
+	}}}}
+
+	err := mgr.updateServerGroupENIBackendID(getReqCtx(newSvcWithAnnotations(nil)), sgs)
+
+	assert.NoError(t, err)
+	assert.Equal(t, [][]string{{"10.96.0.18"}, {"10.96.0.16/28"}}, cloud.requests)
+	if assert.Len(t, sgs[0].Servers, 1) {
+		assert.Equal(t, "eni-prefix", sgs[0].Servers[0].ServerId)
+	}
+}
 
 func makeNLBBackends(n int) []nlbmodel.ServerGroupServer {
 	backends := make([]nlbmodel.ServerGroupServer, n)

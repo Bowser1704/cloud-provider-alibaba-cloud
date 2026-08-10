@@ -3,10 +3,12 @@ package ecs
 import (
 	"context"
 	"fmt"
-	"k8s.io/cloud-provider-alibaba-cloud/pkg/provider/alibaba/base"
 	"testing"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/ecs"
+	"github.com/stretchr/testify/assert"
+	"k8s.io/cloud-provider-alibaba-cloud/pkg/model"
+	"k8s.io/cloud-provider-alibaba-cloud/pkg/provider/alibaba/base"
 )
 
 func NewECSClient() (*ecs.Client, error) {
@@ -49,4 +51,24 @@ func TestEcsProvider_ListInstances(t *testing.T) {
 	}
 
 	t.Logf("ListInstances test successfully")
+}
+
+func TestCollectNetworkInterfaceAddresses(t *testing.T) {
+	networkInterface := ecs.NetworkInterfaceSet{
+		NetworkInterfaceId: "eni-prefix",
+		PrivateIpSets: ecs.PrivateIpSetsInDescribeNetworkInterfaces{
+			PrivateIpSet: []ecs.PrivateIpSet{{PrivateIpAddress: "10.0.0.2"}},
+		},
+		Ipv4PrefixSets: ecs.Ipv4PrefixSetsInDescribeNetworkInterfaces{
+			Ipv4PrefixSet: []ecs.Ipv4PrefixSet{{Ipv4Prefix: "10.0.0.16/28"}},
+		},
+	}
+
+	result := map[string]string{}
+	collectNetworkInterfaceAddresses(result, networkInterface, model.IPv4)
+
+	assert.Equal(t, map[string]string{
+		"10.0.0.2":     "eni-prefix",
+		"10.0.0.16/28": "eni-prefix",
+	}, result)
 }

@@ -155,12 +155,18 @@ func (mgr *ServerGroupManager) updateServerGroupENIBackendID(reqCtx *svcCtx.Requ
 		if len(ipSet.set) == 0 {
 			continue
 		}
-		r, err := mgr.cloud.DescribeNetworkInterfaces(mgr.vpcId, ipSet.set.UnsortedList(), ipSet.ver)
+		resolved, err := reconbackend.ResolveENIBackendIDs(
+			ipSet.set.UnsortedList(),
+			ipSet.ver,
+			func(addresses []string, version model.AddressIPVersionType) (map[string]string, error) {
+				return mgr.cloud.DescribeNetworkInterfaces(mgr.vpcId, addresses, version)
+			},
+		)
 		if err != nil {
 			return fmt.Errorf("call DescribeNetworkInterfaces: %w", err)
 		}
-		for ip, eni := range r {
-			result[ip] = eni
+		for ip, eniID := range resolved {
+			result[ip] = eniID
 		}
 	}
 

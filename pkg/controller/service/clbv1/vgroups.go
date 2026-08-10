@@ -105,12 +105,17 @@ func (mgr *VGroupManager) updateVServerGroupENIBackendID(reqCtx *svcCtx.RequestC
 			}
 		}
 	}
-
 	ips := eniIPs.UnsortedList()
 	if len(ips) == 0 {
 		return nil
 	}
-	result, err := mgr.cloud.DescribeNetworkInterfaces(mgr.vpcId, ips, ipVersion)
+	result, err := backend.ResolveENIBackendIDs(
+		ips,
+		ipVersion,
+		func(addresses []string, version model.AddressIPVersionType) (map[string]string, error) {
+			return mgr.cloud.DescribeNetworkInterfaces(mgr.vpcId, addresses, version)
+		},
+	)
 	if err != nil {
 		return fmt.Errorf("call DescribeNetworkInterfaces: %s", err.Error())
 	}

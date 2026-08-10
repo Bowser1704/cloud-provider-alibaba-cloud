@@ -23,6 +23,38 @@ import (
 	"k8s.io/klog/v2/klogr"
 )
 
+type prefixENIProvider struct {
+	prvd.Provider
+	requests [][]string
+}
+
+func (p *prefixENIProvider) DescribeNetworkInterfaces(_ string, addresses []string, _ model.AddressIPVersionType) (map[string]string, error) {
+	p.requests = append(p.requests, append([]string(nil), addresses...))
+	if len(p.requests) == 1 {
+		return map[string]string{}, nil
+	}
+	return map[string]string{"10.96.0.16/28": "eni-prefix"}, nil
+}
+
+func TestUpdateVServerGroupENIBackendID_IPPrefixFallback(t *testing.T) {
+	kubeClient := getFakeKubeClient()
+	cloud := &prefixENIProvider{Provider: getMockCloudProvider()}
+	mgr, err := NewVGroupManager(kubeClient, cloud)
+	assert.NoError(t, err)
+	nodeName := NodeName
+	vgs := []model.VServerGroup{{Backends: []model.BackendAttribute{{
+		ServerIp: "10.96.0.18", Type: model.ENIBackendType, NodeName: &nodeName,
+	}}}}
+
+	err = mgr.updateVServerGroupENIBackendID(getReqCtx(getDefaultService()), vgs, model.IPv4)
+
+	assert.NoError(t, err)
+	assert.Equal(t, [][]string{{"10.96.0.18"}, {"10.96.0.16/28"}}, cloud.requests)
+	if assert.Len(t, vgs[0].Backends, 1) {
+		assert.Equal(t, "eni-prefix", vgs[0].Backends[0].ServerId)
+	}
+}
+
 func TestVGroupManager_BatchSyncVServerGroupBackendServers(t *testing.T) {
 	vgroupManager, _ := getTestVGroupManager()
 

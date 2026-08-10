@@ -780,6 +780,49 @@ func TestGetNodes(t *testing.T) {
 	})
 }
 
+func TestResolveENIBackendIDs_IPv4PrefixFallback(t *testing.T) {
+	var requests [][]string
+	lookup := func(addresses []string, version model.AddressIPVersionType) (map[string]string, error) {
+		assert.Equal(t, model.IPv4, version)
+		requests = append(requests, append([]string(nil), addresses...))
+		if len(requests) == 1 {
+			return map[string]string{"10.0.0.2": "eni-secondary"}, nil
+		}
+		return map[string]string{"10.0.0.16/28": "eni-prefix"}, nil
+	}
+
+	result, err := ResolveENIBackendIDs(
+		[]string{"10.0.0.2", "10.0.0.18", "10.0.0.19"},
+		model.IPv4,
+		lookup,
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, [][]string{
+		{"10.0.0.2", "10.0.0.18", "10.0.0.19"},
+		{"10.0.0.16/28"},
+	}, requests)
+	assert.Equal(t, map[string]string{
+		"10.0.0.2":  "eni-secondary",
+		"10.0.0.18": "eni-prefix",
+		"10.0.0.19": "eni-prefix",
+	}, result)
+}
+
+func TestResolveENIBackendIDs_IPv6DoesNotGuessPrefix(t *testing.T) {
+	var requests [][]string
+	lookup := func(addresses []string, _ model.AddressIPVersionType) (map[string]string, error) {
+		requests = append(requests, append([]string(nil), addresses...))
+		return map[string]string{}, nil
+	}
+
+	result, err := ResolveENIBackendIDs([]string{"fd00::2"}, model.IPv6, lookup)
+
+	assert.NoError(t, err)
+	assert.Empty(t, result)
+	assert.Equal(t, [][]string{{"fd00::2"}}, requests)
+}
+
 func TestGetEndpoints(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1.AddToScheme(scheme)
